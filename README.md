@@ -1,0 +1,2 @@
+# mazer
+Solve a maze
