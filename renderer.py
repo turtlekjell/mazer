@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from PIL import Image, ImageDraw
+from PIL import Image, ImageChops, ImageDraw, ImageFont
 
 
 def render_maze(
@@ -10,13 +10,33 @@ def render_maze(
     padding=20,
     wall_width=2,
     solution=False,
+    background_image=None,
+    background_opacity=0.0,
+    footer_lines=None,
 ):
     if cell_size < 4:
         raise ValueError("cell_size must be at least 4")
+    if not 0.0 <= background_opacity <= 1.0:
+        raise ValueError("background_opacity must be between 0.0 and 1.0")
+
+    footer_lines = [line for line in (footer_lines or []) if line]
+    font = ImageFont.load_default()
+    footer_height = _footer_height(footer_lines, font)
 
     width = maze.num_cols * cell_size + padding * 2
-    height = maze.num_rows * cell_size + padding * 2
-    image = Image.new("RGB", (width, height), "white")
+    height = maze.num_rows * cell_size + padding * 2 + footer_height
+    image = Image.new("RGBA", (width, height), "white")
+
+    if background_image and background_opacity > 0:
+        _add_background(
+            image,
+            maze,
+            background_image,
+            cell_size=cell_size,
+            padding=padding,
+            opacity=background_opacity,
+        )
+
     draw = ImageDraw.Draw(image)
 
     for col in range(maze.num_cols):
@@ -53,10 +73,61 @@ def render_maze(
     _draw_marker(draw, maze.start, maze.start_opening, cell_size, padding, "S", "#167d32")
     _draw_marker(draw, maze.end, maze.end_opening, cell_size, padding, "E", "#1957b8")
 
+    if footer_lines:
+        _draw_footer(draw, image.width, image.height, padding, footer_lines, font)
+
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    image.save(path)
+    image.convert("RGB").save(path)
     return path
+
+
+def _footer_height(lines, font):
+    if not lines:
+        return 0
+    bbox = font.getbbox("Ag")
+    line_height = bbox[3] - bbox[1]
+    return line_height * len(lines) + 14
+
+
+def _draw_footer(draw, image_width, image_height, padding, lines, font):
+    bbox = font.getbbox("Ag")
+    line_height = bbox[3] - bbox[1]
+    block_height = line_height * len(lines)
+    top = image_height - block_height - 8
+    separator_y = top - 6
+    draw.line((padding, separator_y, image_width - padding, separator_y), fill="#cfcfcf", width=1)
+
+    for index, line in enumerate(lines):
+        y = top + index * line_height
+        draw.text((padding, y), line, fill="#555555", font=font)
+
+
+def _add_background(canvas, maze, source_path, cell_size, padding, opacity):
+    """Fade the source image beneath the maze, clipped to active maze cells."""
+    grid_width = maze.num_cols * cell_size
+    grid_height = maze.num_rows * cell_size
+
+    with Image.open(source_path) as source:
+        source = source.convert("RGBA").resize(
+            (grid_width, grid_height), Image.Resampling.LANCZOS
+        )
+
+    active_mask = Image.new("L", (grid_width, grid_height), 0)
+    mask_draw = ImageDraw.Draw(active_mask)
+    for col in range(maze.num_cols):
+        for row in range(maze.num_rows):
+            if not maze.cells[col][row].active:
+                continue
+            x1 = col * cell_size
+            y1 = row * cell_size
+            mask_draw.rectangle(
+                (x1, y1, x1 + cell_size - 1, y1 + cell_size - 1), fill=255
+            )
+
+    source_alpha = source.getchannel("A").point(lambda value: round(value * opacity))
+    source.putalpha(ImageChops.multiply(source_alpha, active_mask))
+    canvas.alpha_composite(source, (padding, padding))
 
 
 def _draw_marker(draw, cell, opening, cell_size, padding, label, color):

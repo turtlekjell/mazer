@@ -174,5 +174,13 @@ cython_debug/
 .pypirc
 
 # Mazer generated files
-output/
 demo/
+output/*
+!output/.gitkeep
+
+# macOS
+.DS_Store
+
+# Mazer browser uploads (future local web UI)
+uploads/*
+!uploads/.gitkeep
